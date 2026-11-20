@@ -42,6 +42,7 @@ class OutreachRepository(
     contactsRepository: ContactsRepository,
     callLogRepository: CallLogRepository,
     noteDao: NoteDao,
+    settingsRepository: SettingsRepository,
 ) {
     private val permissions = MutableStateFlow(Permissions())
 
@@ -58,12 +59,18 @@ class OutreachRepository(
         .flatMapLatest { granted -> if (granted) callLogRepository.observeCalls() else flowOf(emptyList()) }
 
     val snapshot: StateFlow<OutreachSnapshot> =
-        combine(permissions, enabledTags, contacts, calls, noteDao.observeAll()) { perms, tags, all, callList, notes ->
+        combine(
+            combine(permissions, enabledTags, ::Pair),
+            contacts,
+            calls,
+            noteDao.observeAll(),
+            settingsRepository.settings.map { it.matchExtraFields }.distinctUntilChanged(),
+        ) { (perms, tags), all, callList, notes, matchExtra ->
             OutreachSnapshot(
                 permissions = perms,
                 loading = all == null && perms.contacts != false,
                 enabledTags = tags,
-                contacts = if (all == null) emptyList() else Outreach.build(all, tags, callList, notes),
+                contacts = if (all == null) emptyList() else Outreach.build(all, tags, callList, notes, matchExtra),
             )
         }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), OutreachSnapshot())
 }

@@ -82,4 +82,26 @@ class ExportCodecTest {
         assertEquals(emptyList<CallNote>(), read.notes)
         assertEquals(Settings(), read.settings)
     }
+
+    @Test fun `password-protected export round-trips and needs the password`() {
+        val out = ByteArrayOutputStream()
+        ExportCodec.write(bundle, out, "correct horse".toCharArray())
+        val bytes = out.toByteArray()
+        assertEquals(bundle, ExportCodec.read(ByteArrayInputStream(bytes), "correct horse".toCharArray()))
+
+        val missing = assertThrows(PasswordRequiredException::class.java) { ExportCodec.read(ByteArrayInputStream(bytes)) }
+        assertEquals(false, missing.wrongPassword)
+        val wrong = assertThrows(PasswordRequiredException::class.java) {
+            ExportCodec.read(ByteArrayInputStream(bytes), "wrong".toCharArray())
+        }
+        assertEquals(true, wrong.wrongPassword)
+        // Notes aren't readable without the password.
+        assertTrue(!String(bytes, Charsets.ISO_8859_1).contains("step 4"))
+    }
+
+    @Test fun `plain exports still read when a password is given`() {
+        val out = ByteArrayOutputStream()
+        ExportCodec.write(bundle, out)
+        assertEquals(bundle, ExportCodec.read(ByteArrayInputStream(out.toByteArray()), "unused".toCharArray()))
+    }
 }

@@ -111,4 +111,11 @@ class OutreachTest {
         val built = Outreach.build(listOf(ann, bob, cal), tags, calls, notes)
         assertEquals(WeeklySummary(callsMade = 2, peopleReached = 2, notesWritten = 1), Goals.weekly(built, today, zone))
     }
+
+    @Test fun `extra fields match only when enabled`() {
+        val dana = DeviceContact(5, "k-dana", "Dana", setOf("+15550005"), "555-0005", extraText = "Home group: Tuesday AA")
+        assertEquals(emptyList<OutreachContact>(), Outreach.build(listOf(dana), tags, emptyList(), emptyList()))
+        val built = Outreach.build(listOf(dana), tags, emptyList(), emptyList(), matchExtraFields = true)
+        assertEquals(listOf("aa"), built.single().tags)
+    }
 }

@@ -65,16 +65,21 @@ fun Long.toLocalDate(zone: ZoneId): LocalDate = Instant.ofEpochMilli(this).atZon
 
 object Outreach {
 
-    /** Joins contacts, tags, calls and notes into tagged contacts. Untagged contacts are left out. */
+    /**
+     * Joins contacts, tags, calls and notes into tagged contacts. Untagged contacts are left out.
+     * With [matchExtraFields], tags may also come from the contact's note, company or title.
+     */
     fun build(
         contacts: List<DeviceContact>,
         enabledTags: List<String>,
         calls: List<CallRecord>,
         notes: List<CallNote>,
+        matchExtraFields: Boolean = false,
     ): List<OutreachContact> {
         val callsByKey = calls.groupBy { it.numberKey }
         return contacts.mapNotNull { contact ->
-            val tags = TagMatcher.matchingTags(contact.displayName, enabledTags)
+            val text = if (matchExtraFields) "${contact.displayName} ${contact.extraText}" else contact.displayName
+            val tags = TagMatcher.matchingTags(text, enabledTags)
             if (tags.isEmpty()) return@mapNotNull null
             OutreachContact(
                 contact = contact,

@@ -14,7 +14,7 @@ class BackupManager(private val context: Context, private val container: AppCont
 
     fun suggestedFileName(): String = "steptwelve-export-${LocalDate.now()}.zip"
 
-    suspend fun export(uri: Uri) = withContext(Dispatchers.IO) {
+    suspend fun export(uri: Uri, password: CharArray? = null) = withContext(Dispatchers.IO) {
         val bundle = ExportBundle(
             manifest = ExportManifest(
                 appVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?",
@@ -26,13 +26,13 @@ class BackupManager(private val context: Context, private val container: AppCont
             settings = container.settingsRepository.current(),
         )
         val out = context.contentResolver.openOutputStream(uri, "wt") ?: error("Couldn't open the file for writing.")
-        out.use { ExportCodec.write(bundle, it) }
+        out.use { ExportCodec.write(bundle, it, password) }
     }
 
     /** Parses and validates without changing anything. Throws [ImportException]. */
-    suspend fun preview(uri: Uri): ExportBundle = withContext(Dispatchers.IO) {
+    suspend fun preview(uri: Uri, password: CharArray? = null): ExportBundle = withContext(Dispatchers.IO) {
         val input = context.contentResolver.openInputStream(uri) ?: throw ImportException("Couldn't open the file.")
-        input.use { ExportCodec.read(it) }
+        input.use { ExportCodec.read(it, password) }
     }
 
     /** Returns how many notes and entries were added. */

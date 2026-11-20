@@ -36,7 +36,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .build()
 
         /** v2 added "sponsee" and "sponsor" to the default tags; give them to existing installs too. */
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        internal val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 listOf("sponsee", "sponsor").forEach { label ->
                     db.execSQL("INSERT OR IGNORE INTO Tag (label, enabled) VALUES (?, 1)", arrayOf(label))

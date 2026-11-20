@@ -12,6 +12,8 @@ data class DeviceContact(
     val numberKeys: Set<String> = emptySet(),
     /** First phone number as stored, used for Call and Text actions. */
     val primaryNumber: String? = null,
+    /** The contact's note, company and job title, for optional tag matching. */
+    val extraText: String = "",
 )
 
 /** Reads contacts live from the system provider. Nothing is copied into the app's database. */
@@ -27,6 +29,7 @@ class ContactsRepository(
 
     private fun queryContacts(): List<DeviceContact> {
         val numbers = queryNumberKeys()
+        val extras = queryExtraText()
         val projection = arrayOf(
             ContactsContract.Contacts._ID,
             ContactsContract.Contacts.LOOKUP_KEY,
@@ -50,10 +53,37 @@ class ContactsRepository(
                     displayName = cursor.getString(nameCol) ?: continue,
                     numberKeys = numbers[cursor.getLong(idCol)]?.keys.orEmpty(),
                     primaryNumber = numbers[cursor.getLong(idCol)]?.firstRaw,
+                    extraText = extras[cursor.getLong(idCol)].orEmpty(),
                 )
             }
         }
         return contacts
+    }
+
+    /** Contact id -> note, company and title text joined with spaces. */
+    private fun queryExtraText(): Map<Long, String> {
+        val result = HashMap<Long, StringBuilder>()
+        val note = ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE
+        val org = ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE
+        resolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(
+                ContactsContract.Data.CONTACT_ID,
+                ContactsContract.Data.DATA1, // Note.NOTE / Organization.COMPANY
+                ContactsContract.Data.DATA4, // Organization.TITLE
+                ContactsContract.Data.MIMETYPE,
+            ),
+            "${ContactsContract.Data.MIMETYPE} IN (?, ?)",
+            arrayOf(note, org),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val sb = result.getOrPut(cursor.getLong(0)) { StringBuilder() }
+                cursor.getString(1)?.let { sb.append(' ').append(it) }
+                if (cursor.getString(3) == org) cursor.getString(2)?.let { sb.append(' ').append(it) }
+            }
+        }
+        return result.mapValues { it.value.toString().trim() }
     }
 
     private class Numbers(var firstRaw: String? = null, val keys: MutableSet<String> = mutableSetOf())

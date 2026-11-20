@@ -15,7 +15,7 @@ The spec, architecture, build, release and testing details for StepTwelve. For w
 ## Features
 
 ### 1. Tag-filtered contact list
-- Reads the device contacts and shows only contacts whose **display name** matches one of your tags. (Matching the contact's note or organization field is not built yet.)
+- Reads the device contacts and shows only contacts whose **display name** matches one of your tags. Optionally (Settings, off by default) the contact's note, company and job title are matched too.
 - **Default tags:** `12step`, `saa`, `aa`, `newcomer`, `sponsee`, `sponsor`.
 - Tags are editable: add, remove, rename, reset to defaults.
 - **Matching rules:**
@@ -85,7 +85,7 @@ The spec, architecture, build, release and testing details for StepTwelve. For w
 - Contacts and the call log themselves are **not** exported, only the app's own data plus the minimum needed to re-link notes (normalized number, timestamp, contact display name at time of note).
 - **Import** from the same ZIP format (via `ACTION_OPEN_DOCUMENT`) to restore or move to a new phone. Validate the schema version, show a preview ("42 notes, 4 tags"), and offer *merge* or *replace*.
 - Before exporting, show a plain warning: *"This file contains your outreach notes. Once it leaves the app it is not protected by StepTwelve. Store it somewhere safe."*
-- Optional (nice-to-have): password-protected ZIP using AES-256 (for example via zip4j, which is offline-only). Off by default.
+- Optional password protection (off by default): every entry is AES-256 encrypted with zip4j (offline-only, no manifest entries). Import detects encrypted exports and asks for the password; a wrong password is reported, never silently ignored. 7-Zip and most archive tools can open these files too.
 - Build the ZIP with `java.util.zip` (no extra dependency needed for the default path).
 
 ---
@@ -104,7 +104,7 @@ The spec, architecture, build, release and testing details for StepTwelve. For w
 - **Architecture:** single-activity, MVVM, `ViewModel` + `StateFlow`, Navigation-Compose
 - **DI:** manual (`AppContainer`), which keeps the project small
 - **Persistence:** Room (SQLite) for notes and tags, DataStore for settings, both in app-private internal storage
-- **Export:** `java.util.zip` + kotlinx.serialization (JSON) and a small CSV writer
+- **Export:** `java.util.zip` (plain) or zip4j (AES-256 when a password is set) + kotlinx.serialization (JSON) and a small CSV writer
 - **Background:** `AlarmManager` (inexact windows) plus a boot/package-replaced/time-change receiver that reschedules. WorkManager is deliberately not used: its manifest adds `ACCESS_NETWORK_STATE`, which the no-network check forbids.
 - **Min SDK:** 26, **Target SDK:** latest stable
 - **Build:** Gradle Kotlin DSL with a version catalog (`libs.versions.toml`)
@@ -159,7 +159,7 @@ The spec, architecture, build, release and testing details for StepTwelve. For w
 Settings (daily goal, reminder time, post-call prompt, lock and lock delay, FLAG_SECURE, discreet icon, sort order) go in Preferences DataStore in app-private storage. Database migrations: v1 to v2 adds the `sponsee`/`sponsor` default tags; v2 to v3 (auto-migration) adds `CallNote`. Schemas are exported to `app/schemas/`.
 
 ## Screens
-1. **Onboarding:** currently a single screen on first launch: what the app does, the privacy promise, and the contacts permission request. Call log access is asked for in context from the home screen.
+1. **Onboarding:** six steps on first launch: welcome, privacy promise, contacts permission, tag setup, call log permission (optional), done. Skipped for installs that already have contacts access.
 2. **Home / Contacts:** goal header with a 7-day strip and weekly summary, sort menu, search, tag filter chips, sorted list with last-contact label, called-today check and last-call icon.
 3. **Contact detail:** call history with inline notes and quick actions.
 4. **Note editor:** bottom sheet with outcome chips, note text, and an optional follow-up reminder.
@@ -177,11 +177,7 @@ Settings (daily goal, reminder time, post-call prompt, lock and lock delay, FLAG
 6. **M6, goal, reminders, app lock, FLAG_SECURE, discreet alias.**
 7. **M7, ZIP export/import,** then polish, accessibility pass (TalkBack, font scaling), and a signed `v1.0.0` release published on GitHub Releases.
 
-**Status:** M1 to M7 are built and tested on a Pixel 8 over adb. Not built yet:
-- matching tags against the contact's note or organization field
-- password-protected ZIP export (nice-to-have)
-- a multi-step onboarding with tag setup (there's a single permission screen)
-- instrumented tests (unit tests cover the matcher, time labels, outreach model, goals, and the ZIP round-trip)
+**Status:** all milestones are built and tested on a Pixel 8 over adb, including the extras: note/company tag matching, password-protected export and the onboarding walkthrough.
 
 ## Architecture
 - `data/`: providers (contacts, call log) read live through `ContentResolver` with `ContentObserver`s, Room (tags, notes), DataStore (settings). `OutreachRepository` joins everything into one `OutreachSnapshot` that every screen shares.
@@ -193,7 +189,8 @@ Settings (daily goal, reminder time, post-call prompt, lock and lock delay, FLAG
 
 ## Testing
 - Unit tests: tag matcher, phone number normalization and matching, goal counting, ZIP export → import round-trip (data identical after restore), schema-version handling.
-- Instrumented tests: Room open and migrate, with a fake ContactsProvider and CallLog data.
+- Database and provider tests run on the JVM with Robolectric (no device needed, and they never touch a real install): Room migration 1 to 3 against the exported schemas, default tag seeding, tag normalization, note saving with follow-up alarms (via `ShadowAlarmManager`), fake Contacts and CallLog providers for number matching and extra-field matching, and a full export/merge/replace round-trip through `BackupManager`.
+- `./gradlew assembleDebug -PtestInstall=name` builds a side-by-side copy (`app.steptwelve.name`) for testing fresh-install flows such as onboarding on a real device without touching the main install.
 - Manual QA: deny each permission and confirm graceful fallback; reboot and confirm reminders persist; confirm `adb backup` and cloud backup contain no app data; confirm the merged manifest has no network permissions; run with airplane mode on and confirm everything works.
 
 ## Building

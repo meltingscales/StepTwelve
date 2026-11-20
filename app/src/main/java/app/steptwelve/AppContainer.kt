@@ -29,6 +29,7 @@ class AppContainer(context: Context) {
         contactsRepository = ContactsRepository(context.contentResolver, phoneNumberKeys),
         callLogRepository = CallLogRepository(context.contentResolver, phoneNumberKeys),
         noteDao = database.noteDao(),
+        settingsRepository = settingsRepository,
     )
     val postCallTracker = PostCallTracker()
     val appLock = AppLock()

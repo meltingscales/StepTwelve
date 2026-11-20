@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -45,11 +48,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.steptwelve.StepTwelveApp
 import app.steptwelve.backup.ExportBundle
 import app.steptwelve.backup.ImportException
+import app.steptwelve.backup.PasswordRequiredException
 import app.steptwelve.data.Settings
 import app.steptwelve.ui.MainViewModel
 import app.steptwelve.ui.hasPermission
@@ -77,6 +83,9 @@ fun SettingsScreen(viewModel: MainViewModel, onOpenTags: () -> Unit) {
     var importPreview by remember { mutableStateOf<ExportBundle?>(null) }
     var confirmReplace by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
+    var exportPassword by remember { mutableStateOf<CharArray?>(null) }
+    var passwordImportUri by remember { mutableStateOf<Uri?>(null) }
+    var importPasswordWrong by remember { mutableStateOf(false) }
 
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) update { it.copy(reminderEnabled = true) }
@@ -84,7 +93,11 @@ fun SettingsScreen(viewModel: MainViewModel, onOpenTags: () -> Unit) {
     }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri: Uri? ->
         if (uri != null) scope.launch {
-            val message = runCatching { backup.export(uri) }.fold({ "Export saved." }, { "Export failed: ${it.message}" })
+            val password = exportPassword
+            exportPassword = null
+            val message = runCatching { backup.export(uri, password) }
+                .fold({ if (password != null) "Password-protected export saved." else "Export saved." }, { "Export failed: ${it.message}" })
+            password?.fill(' ')
             snackbar.showSnackbar(message)
         }
     }
@@ -92,6 +105,9 @@ fun SettingsScreen(viewModel: MainViewModel, onOpenTags: () -> Unit) {
         if (uri != null) scope.launch {
             try {
                 importPreview = backup.preview(uri)
+            } catch (e: PasswordRequiredException) {
+                importPasswordWrong = false
+                passwordImportUri = uri
             } catch (e: ImportException) {
                 snackbar.showSnackbar(e.message ?: "Couldn't read that file.")
             } catch (e: Exception) {
@@ -127,6 +143,11 @@ fun SettingsScreen(viewModel: MainViewModel, onOpenTags: () -> Unit) {
                 settings.postCallPrompt,
             ) { on -> update { it.copy(postCallPrompt = on) } }
             NavItem("Tags", "Choose which contacts appear.", onOpenTags)
+            SwitchItem(
+                "Match notes and company too",
+                "Also find tags in each contact's note, company or job title, not just the name.",
+                settings.matchExtraFields,
+            ) { on -> update { it.copy(matchExtraFields = on) } }
 
             Section("Reminders")
             SwitchItem(
@@ -223,22 +244,82 @@ fun SettingsScreen(viewModel: MainViewModel, onOpenTags: () -> Unit) {
     }
 
     if (showExportWarning) {
+        var protect by remember { mutableStateOf(false) }
+        var password by remember { mutableStateOf("") }
+        var confirm by remember { mutableStateOf("") }
+        val passwordOk = !protect || (password.length >= 6 && password == confirm)
         AlertDialog(
             onDismissRequest = { showExportWarning = false },
             title = { Text("Export your data") },
             text = {
-                Text(
-                    "This file contains your outreach notes. Once it leaves the app it is not protected by " +
-                        "StepTwelve. Store it somewhere safe."
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "This file contains your outreach notes. Once it leaves the app it is not protected by " +
+                            "StepTwelve. Store it somewhere safe."
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().clickable { protect = !protect },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Protect with a password", Modifier.weight(1f))
+                        Switch(checked = protect, onCheckedChange = null)
+                    }
+                    if (protect) {
+                        PasswordField(password, { password = it }, "Password")
+                        PasswordField(confirm, { confirm = it }, "Confirm password")
+                        Text(
+                            when {
+                                password.length < 6 -> "At least 6 characters. There's no way to recover a forgotten password."
+                                password != confirm -> "Passwords don't match."
+                                else -> "AES-256 encrypted. There's no way to recover a forgotten password."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(enabled = passwordOk, onClick = {
                     showExportWarning = false
+                    exportPassword = if (protect) password.toCharArray() else null
                     exportLauncher.launch(backup.suggestedFileName())
                 }) { Text("Choose location") }
             },
             dismissButton = { TextButton(onClick = { showExportWarning = false }) { Text("Cancel") } },
+        )
+    }
+
+    passwordImportUri?.let { uri ->
+        var password by remember(uri) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { passwordImportUri = null },
+            title = { Text("Enter the export password") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (importPasswordWrong) Text("That password didn't work.", color = MaterialTheme.colorScheme.error)
+                    PasswordField(password, { password = it }, "Password")
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = password.isNotEmpty(), onClick = {
+                    val chars = password.toCharArray()
+                    scope.launch {
+                        try {
+                            importPreview = backup.preview(uri, chars)
+                            passwordImportUri = null
+                        } catch (e: PasswordRequiredException) {
+                            importPasswordWrong = true
+                        } catch (e: Exception) {
+                            passwordImportUri = null
+                            snackbar.showSnackbar(e.message ?: "Couldn't read that file.")
+                        } finally {
+                            chars.fill(' ')
+                        }
+                    }
+                }) { Text("Open") }
+            },
+            dismissButton = { TextButton(onClick = { passwordImportUri = null }) { Text("Cancel") } },
         )
     }
 
@@ -308,6 +389,19 @@ fun SettingsScreen(viewModel: MainViewModel, onOpenTags: () -> Unit) {
             confirmButton = { TextButton(onClick = { showAbout = false }) { Text("Close") } },
         )
     }
+}
+
+@Composable
+private fun PasswordField(value: String, onChange: (String) -> Unit, label: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

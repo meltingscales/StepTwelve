@@ -35,7 +35,7 @@ Optional extras in Settings: an **app lock** (fingerprint, face or screen lock),
 
 ## How it works
 
-**Tag your contacts by name.** StepTwelve shows contacts whose names include one of your tags as a whole word, like "Sam AA", "Jo (SAA)" or "Chris sponsor". "AA" matches "John AA" but not "Aaron". The default tags are `12step`, `saa`, `aa`, `newcomer`, `sponsee` and `sponsor`, and you can add, rename or turn off tags any time.
+**Tag your contacts by name.** StepTwelve shows contacts whose names include one of your tags as a whole word, like "Sam AA", "Jo (SAA)" or "Chris sponsor". "AA" matches "John AA" but not "Aaron". The default tags are `12step`, `saa`, `aa`, `newcomer`, `sponsee` and `sponsor`, and you can add, rename or turn off tags any time. Prefer not to put tags in names? Turn on **Match notes and company too** in Settings and put them in the contact's note or company field instead.
 
 **See who you haven't talked to in a while.** The contact list puts the people you've gone longest without contacting at the top, with a small "3d ago" or "never" next to each name. A check mark shows who you've reached out to today. You can also sort by name or most recent.
 
@@ -49,7 +49,7 @@ Optional extras in Settings: an **app lock** (fingerprint, face or screen lock),
 
 **Reminders.** Optionally get a daily nudge at a time you choose, or ask to be reminded to call someone again in a few days.
 
-**Back up and move phones.** Settings > Export saves a ZIP of your notes, entries, tags and settings wherever you choose. Import it on your new phone. The ZIP is not protected once it leaves the app, so keep it somewhere safe.
+**Back up and move phones.** Settings > Export saves a ZIP of your notes, entries, tags and settings wherever you choose. Import it on your new phone. You can protect the ZIP with a password (AES-256); without one, anyone who gets the file can read it, so keep it somewhere safe. A forgotten password can't be recovered.
 
 ## Permissions
 

@@ -1,5 +1,6 @@
 package app.steptwelve
 
+import android.Manifest
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -19,6 +20,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.fragment.app.FragmentActivity
@@ -31,7 +35,9 @@ import androidx.navigation.compose.rememberNavController
 import app.steptwelve.ui.MainViewModel
 import app.steptwelve.ui.common.NoteEditorSheet
 import app.steptwelve.ui.contact.ContactDetailScreen
+import app.steptwelve.ui.hasPermission
 import app.steptwelve.ui.home.HomeScreen
+import app.steptwelve.ui.onboarding.OnboardingScreen
 import app.steptwelve.ui.lock.LockScreen
 import app.steptwelve.ui.refreshPermissions
 import app.steptwelve.ui.settings.SettingsScreen
@@ -60,8 +66,28 @@ class MainActivity : FragmentActivity() {
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 }
 
+                // Decided once per launch, so granting contacts mid-walkthrough doesn't end it early.
+                // Existing installs that already granted contacts access skip the walkthrough.
+                var onboarding by rememberSaveable { mutableStateOf<Boolean?>(null) }
+                LaunchedEffect(settings != null) {
+                    val s = settings ?: return@LaunchedEffect
+                    if (onboarding == null) {
+                        onboarding = !s.onboardingDone && !hasPermission(Manifest.permission.READ_CONTACTS)
+                        if (!s.onboardingDone && onboarding == false) {
+                            viewModel.updateSettings(this@MainActivity) { it.copy(onboardingDone = true) }
+                        }
+                    }
+                }
+
                 when {
-                    settings == null -> Unit
+                    settings == null || onboarding == null -> Unit
+                    onboarding == true -> OnboardingScreen(
+                        viewModel = viewModel,
+                        onDone = {
+                            onboarding = false
+                            viewModel.updateSettings(this@MainActivity) { it.copy(onboardingDone = true) }
+                        },
+                    )
                     settings!!.appLock && locked -> LockScreen(
                         appName = if (settings!!.discreetIcon) "Circle Back" else "StepTwelve",
                         onUnlocked = viewModel::unlock,

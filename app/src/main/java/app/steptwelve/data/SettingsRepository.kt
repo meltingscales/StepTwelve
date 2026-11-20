@@ -26,6 +26,9 @@ data class Settings(
     val screenPrivacy: Boolean = false,
     val discreetIcon: Boolean = false,
     val sortOrder: SortOrder = SortOrder.NEGLECTED,
+    /** Also look for tags in each contact's note, company and job title. */
+    val matchExtraFields: Boolean = false,
+    val onboardingDone: Boolean = false,
 )
 
 // App-private internal storage; excluded from backups by the manifest rules.
@@ -44,6 +47,8 @@ class SettingsRepository(context: Context) {
         val screenPrivacy = booleanPreferencesKey("screen_privacy")
         val discreetIcon = booleanPreferencesKey("discreet_icon")
         val sortOrder = intPreferencesKey("sort_order")
+        val matchExtraFields = booleanPreferencesKey("match_extra_fields")
+        val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
 
     private fun Preferences.toSettings(): Settings {
@@ -58,6 +63,8 @@ class SettingsRepository(context: Context) {
             screenPrivacy = this[Keys.screenPrivacy] ?: d.screenPrivacy,
             discreetIcon = this[Keys.discreetIcon] ?: d.discreetIcon,
             sortOrder = SortOrder.entries.getOrNull(this[Keys.sortOrder] ?: -1) ?: d.sortOrder,
+            matchExtraFields = this[Keys.matchExtraFields] ?: d.matchExtraFields,
+            onboardingDone = this[Keys.onboardingDone] ?: d.onboardingDone,
         )
     }
 
@@ -78,6 +85,8 @@ class SettingsRepository(context: Context) {
             p[Keys.screenPrivacy] = new.screenPrivacy
             p[Keys.discreetIcon] = new.discreetIcon
             p[Keys.sortOrder] = new.sortOrder.ordinal
+            p[Keys.matchExtraFields] = new.matchExtraFields
+            p[Keys.onboardingDone] = new.onboardingDone
         }
     }
 }

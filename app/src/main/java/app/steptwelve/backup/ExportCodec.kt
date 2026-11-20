@@ -12,7 +12,6 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.time.Instant
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 @Serializable
@@ -31,7 +30,11 @@ data class ExportBundle(
     val settings: Settings,
 )
 
-class ImportException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class ImportException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** The export is password-protected and no password (or the wrong one) was given. */
+class PasswordRequiredException(val wrongPassword: Boolean) :
+    ImportException(if (wrongPassword) "That password didn't work." else "This export is password-protected.")
 
 /** Reads and writes the export ZIP: manifest.json, notes.json, notes.csv, tags.json, settings.json. */
 object ExportCodec {
@@ -44,30 +47,64 @@ object ExportCodec {
         encodeDefaults = true
     }
 
-    fun write(bundle: ExportBundle, out: OutputStream) {
-        ZipOutputStream(out).use { zip ->
-            fun entry(name: String, text: String) {
-                zip.putNextEntry(ZipEntry(name))
-                zip.write(text.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
+    /**
+     * Writes the export. Without a [password] it's a plain ZIP (java.util.zip); with one, every
+     * entry is AES-256 encrypted (zip4j), which 7-Zip and most archive tools can open.
+     */
+    fun write(bundle: ExportBundle, out: OutputStream, password: CharArray? = null) {
+        val entries = listOf(
+            "manifest.json" to json.encodeToString(ExportManifest.serializer(), bundle.manifest),
+            "notes.json" to json.encodeToString(ListSerializer(CallNote.serializer()), bundle.notes),
+            "notes.csv" to toCsv(bundle.notes),
+            "tags.json" to json.encodeToString(ListSerializer(Tag.serializer()), bundle.tags),
+            "settings.json" to json.encodeToString(Settings.serializer(), bundle.settings),
+        )
+        if (password == null || password.isEmpty()) {
+            ZipOutputStream(out).use { zip ->
+                entries.forEach { (name, text) ->
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(text.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
             }
-            entry("manifest.json", json.encodeToString(ExportManifest.serializer(), bundle.manifest))
-            entry("notes.json", json.encodeToString(ListSerializer(CallNote.serializer()), bundle.notes))
-            entry("notes.csv", toCsv(bundle.notes))
-            entry("tags.json", json.encodeToString(ListSerializer(Tag.serializer()), bundle.tags))
-            entry("settings.json", json.encodeToString(Settings.serializer(), bundle.settings))
+        } else {
+            net.lingala.zip4j.io.outputstream.ZipOutputStream(out, password).use { zip ->
+                entries.forEach { (name, text) ->
+                    zip.putNextEntry(
+                        net.lingala.zip4j.model.ZipParameters().apply {
+                            fileNameInZip = name
+                            compressionMethod = net.lingala.zip4j.model.enums.CompressionMethod.DEFLATE
+                            isEncryptFiles = true
+                            encryptionMethod = net.lingala.zip4j.model.enums.EncryptionMethod.AES
+                            aesKeyStrength = net.lingala.zip4j.model.enums.AesKeyStrength.KEY_STRENGTH_256
+                        }
+                    )
+                    zip.write(text.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+            }
         }
     }
 
-    fun read(input: InputStream): ExportBundle {
+    /** Reads plain or password-protected exports. Throws [PasswordRequiredException] when needed. */
+    fun read(input: InputStream, password: CharArray? = null): ExportBundle {
         val files = HashMap<String, String>()
         try {
-            ZipInputStream(input).use { zip ->
+            net.lingala.zip4j.io.inputstream.ZipInputStream(input, password?.takeIf { it.isNotEmpty() }).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
-                    if (!entry.isDirectory && entry.name in KNOWN_FILES) files[entry.name] = readLimited(zip)
+                    if (entry.isEncrypted && (password == null || password.isEmpty())) {
+                        throw PasswordRequiredException(wrongPassword = false)
+                    }
+                    if (!entry.isDirectory && entry.fileName in KNOWN_FILES) files[entry.fileName] = readLimited(zip)
                 }
             }
+        } catch (e: net.lingala.zip4j.exception.ZipException) {
+            if (e.type == net.lingala.zip4j.exception.ZipException.Type.WRONG_PASSWORD) {
+                // zip4j reports a missing password the same way as a wrong one.
+                throw PasswordRequiredException(wrongPassword = password != null && password.isNotEmpty())
+            }
+            throw ImportException("This file isn't a readable ZIP.", e)
         } catch (e: java.io.IOException) {
             throw ImportException("This file isn't a readable ZIP.", e)
         }

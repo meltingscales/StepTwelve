@@ -45,6 +45,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // `-PtestInstall=name` builds a side-by-side copy (app.steptwelve.name) for testing
+            // fresh-install flows on a device without touching the real install's data.
+            (project.findProperty("testInstall") as String?)?.let { applicationIdSuffix = ".$it" }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -62,6 +67,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
+    // Room migration tests (Robolectric) read the exported schemas from the debug assets.
+    // Debug builds only; release APKs don't include them.
+    sourceSets.getByName("debug").assets.srcDir("$projectDir/schemas")
 
     buildFeatures {
         compose = true
@@ -92,12 +105,17 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.zip4j)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // Hard privacy rule: the merged manifest (including permissions pulled in by
