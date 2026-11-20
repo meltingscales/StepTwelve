@@ -13,6 +13,9 @@ interface TagDao {
     @Query("SELECT * FROM Tag ORDER BY label")
     fun observeAll(): Flow<List<Tag>>
 
+    @Query("SELECT * FROM Tag ORDER BY label")
+    suspend fun getAll(): List<Tag>
+
     /** Returns the new row id, or -1 if a tag with that label already exists. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(tag: Tag): Long

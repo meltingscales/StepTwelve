@@ -1,15 +1,8 @@
 package app.steptwelve.data
 
 import android.content.ContentResolver
-import android.database.ContentObserver
 import android.provider.ContactsContract
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 
 data class DeviceContact(
     val id: Long,
@@ -17,6 +10,8 @@ data class DeviceContact(
     val displayName: String,
     /** Comparable keys for the contact's phone numbers (see [PhoneNumberKeys]). */
     val numberKeys: Set<String> = emptySet(),
+    /** First phone number as stored, used for Call and Text actions. */
+    val primaryNumber: String? = null,
 )
 
 /** Reads contacts live from the system provider. Nothing is copied into the app's database. */
@@ -27,20 +22,8 @@ class ContactsRepository(
 
     /** Emits the full contact list now and again whenever the system contacts change. */
     fun observeContacts(): Flow<List<DeviceContact>> =
-        callbackFlow {
-            val observer = object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    trySend(Unit)
-                }
-            }
-            // The authority URI also covers phone number (Data) changes.
-            resolver.registerContentObserver(ContactsContract.AUTHORITY_URI, true, observer)
-            trySend(Unit)
-            awaitClose { resolver.unregisterContentObserver(observer) }
-        }
-            .conflate()
-            .map { queryContacts() }
-            .flowOn(Dispatchers.IO)
+        // The authority URI also covers phone number (Data) changes.
+        resolver.observeQuery(ContactsContract.AUTHORITY_URI) { queryContacts() }
 
     private fun queryContacts(): List<DeviceContact> {
         val numbers = queryNumberKeys()
@@ -65,16 +48,19 @@ class ContactsRepository(
                     id = cursor.getLong(idCol),
                     lookupKey = cursor.getString(keyCol) ?: continue,
                     displayName = cursor.getString(nameCol) ?: continue,
-                    numberKeys = numbers[cursor.getLong(idCol)].orEmpty(),
+                    numberKeys = numbers[cursor.getLong(idCol)]?.keys.orEmpty(),
+                    primaryNumber = numbers[cursor.getLong(idCol)]?.firstRaw,
                 )
             }
         }
         return contacts
     }
 
-    /** Contact id -> number keys for every phone number on that contact. */
-    private fun queryNumberKeys(): Map<Long, Set<String>> {
-        val result = HashMap<Long, MutableSet<String>>()
+    private class Numbers(var firstRaw: String? = null, val keys: MutableSet<String> = mutableSetOf())
+
+    /** Contact id -> keys for every phone number on that contact (primary number first). */
+    private fun queryNumberKeys(): Map<Long, Numbers> {
+        val result = HashMap<Long, Numbers>()
         resolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
             arrayOf(
@@ -84,14 +70,17 @@ class ContactsRepository(
             ),
             null,
             null,
-            null,
+            "${ContactsContract.CommonDataKinds.Phone.IS_SUPER_PRIMARY} DESC, ${ContactsContract.CommonDataKinds.Phone.IS_PRIMARY} DESC",
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
             val numberCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
             val normalizedCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NORMALIZED_NUMBER)
             while (cursor.moveToNext()) {
-                val key = keys.key(cursor.getString(numberCol), cursor.getString(normalizedCol)) ?: continue
-                result.getOrPut(cursor.getLong(idCol)) { mutableSetOf() } += key
+                val raw = cursor.getString(numberCol)
+                val key = keys.key(raw, cursor.getString(normalizedCol)) ?: continue
+                val numbers = result.getOrPut(cursor.getLong(idCol)) { Numbers() }
+                if (numbers.firstRaw == null) numbers.firstRaw = raw
+                numbers.keys += key
             }
         }
         return result

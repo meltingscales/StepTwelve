@@ -32,6 +32,13 @@ class TagRepository(private val dao: TagDao) {
 
     suspend fun delete(tag: Tag) = dao.delete(tag.id)
 
+    suspend fun getAll(): List<Tag> = dao.getAll()
+
+    suspend fun replaceAll(tags: List<Tag>) = dao.replaceAll(tags)
+
+    /** Adds tags whose labels don't exist yet. */
+    suspend fun mergeAll(tags: List<Tag>) = dao.insertAll(tags)
+
     suspend fun resetToDefaults() = dao.replaceAll(DEFAULT_TAGS.map { Tag(label = it) })
 
     companion object {

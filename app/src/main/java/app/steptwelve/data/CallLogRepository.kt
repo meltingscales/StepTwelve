@@ -1,15 +1,22 @@
 package app.steptwelve.data
 
 import android.content.ContentResolver
-import android.database.ContentObserver
 import android.provider.CallLog
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+
+enum class CallType { INCOMING, OUTGOING, MISSED, OTHER }
+
+data class CallRecord(
+    /** CallLog.Calls._ID. Can change after a call-log restore, so notes also keep number + time. */
+    val id: Long,
+    val numberKey: String,
+    val date: Long,
+    val durationSeconds: Long,
+    val type: CallType,
+) {
+    /** Duration 0 means the call never connected. */
+    val connected: Boolean get() = durationSeconds > 0
+}
 
 /** Reads the system call log live and read-only. Nothing is copied into the app's database. */
 class CallLogRepository(
@@ -17,43 +24,48 @@ class CallLogRepository(
     private val keys: PhoneNumberKeys,
 ) {
 
-    /**
-     * Emits number key -> time (epoch ms) of the most recent outgoing call to that number,
-     * connected or not, since reaching out is what counts. Re-emits when the call log changes.
-     */
-    fun observeLastOutgoing(): Flow<Map<String, Long>> =
-        callbackFlow {
-            val observer = object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    trySend(Unit)
-                }
-            }
-            resolver.registerContentObserver(CallLog.Calls.CONTENT_URI, true, observer)
-            trySend(Unit)
-            awaitClose { resolver.unregisterContentObserver(observer) }
-        }
-            .conflate()
-            .map { queryLastOutgoing() }
-            .flowOn(Dispatchers.IO)
+    /** All calls, newest first. Re-emits whenever the call log changes. */
+    fun observeCalls(): Flow<List<CallRecord>> =
+        resolver.observeQuery(CallLog.Calls.CONTENT_URI) { queryCalls() }
 
-    private fun queryLastOutgoing(): Map<String, Long> {
-        val result = HashMap<String, Long>()
+    private fun queryCalls(): List<CallRecord> {
+        val calls = mutableListOf<CallRecord>()
         resolver.query(
             CallLog.Calls.CONTENT_URI,
-            arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NORMALIZED_NUMBER, CallLog.Calls.DATE),
-            "${CallLog.Calls.TYPE} = ?",
-            arrayOf(CallLog.Calls.OUTGOING_TYPE.toString()),
+            arrayOf(
+                CallLog.Calls._ID,
+                CallLog.Calls.NUMBER,
+                CallLog.Calls.CACHED_NORMALIZED_NUMBER,
+                CallLog.Calls.DATE,
+                CallLog.Calls.DURATION,
+                CallLog.Calls.TYPE,
+            ),
+            null,
+            null,
             "${CallLog.Calls.DATE} DESC",
         )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(CallLog.Calls._ID)
             val numberCol = cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
             val normalizedCol = cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NORMALIZED_NUMBER)
             val dateCol = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)
+            val durationCol = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)
+            val typeCol = cursor.getColumnIndexOrThrow(CallLog.Calls.TYPE)
             while (cursor.moveToNext()) {
                 val key = keys.key(cursor.getString(numberCol), cursor.getString(normalizedCol)) ?: continue
-                // Rows are newest first, so the first time we see a key is its latest call.
-                result.putIfAbsent(key, cursor.getLong(dateCol))
+                calls += CallRecord(
+                    id = cursor.getLong(idCol),
+                    numberKey = key,
+                    date = cursor.getLong(dateCol),
+                    durationSeconds = cursor.getLong(durationCol),
+                    type = when (cursor.getInt(typeCol)) {
+                        CallLog.Calls.INCOMING_TYPE, CallLog.Calls.ANSWERED_EXTERNALLY_TYPE -> CallType.INCOMING
+                        CallLog.Calls.OUTGOING_TYPE -> CallType.OUTGOING
+                        CallLog.Calls.MISSED_TYPE, CallLog.Calls.REJECTED_TYPE -> CallType.MISSED
+                        else -> CallType.OTHER
+                    },
+                )
             }
         }
-        return result
+        return calls
     }
 }
