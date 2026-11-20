@@ -4,6 +4,21 @@
 
 StepTwelve makes 12th-step outreach easy. It pulls the program people from your contacts, shows who you've called and when, and lets you jot a note after each call. No paper log, no spreadsheet, no cloud.
 
+## Download
+
+**[Get the latest APK from the Releases page](../../releases/latest)** (`steptwelve-<version>.apk`).
+
+StepTwelve isn't on the Play Store (see *Non-goals*), so you install the APK directly. This is called sideloading:
+
+1. On your Android phone, open the [Releases page](../../releases/latest) and tap `steptwelve-<version>.apk` to download it.
+2. Open the downloaded file (from the browser's downloads or the Files app).
+3. Android will say installs from this source are blocked. Tap **Settings**, turn on **Allow from this source** for your browser or Files app, then go back and tap **Install**.
+4. Optional: turn that setting back off afterward. StepTwelve keeps working.
+
+To update, install the newer APK the same way. Your notes and settings are kept, since every release is signed with the same key. Want update alerts without checking by hand? [Obtainium](https://github.com/ImranR98/Obtainium) can watch this repo's Releases page for you.
+
+Each release also has a `.sha256` file if you want to verify the download (`sha256sum -c steptwelve-<version>.apk.sha256`).
+
 > **Privacy first, always.** Contact names and call notes can reveal fellowship membership and very personal recovery details. StepTwelve:
 > - has **no internet permission** and needs no network access of any kind
 > - shows **no ads** and has **no analytics, crash reporting, or tracking SDKs**
@@ -18,11 +33,11 @@ StepTwelve makes 12th-step outreach easy. It pulls the program people from your 
 
 ### 1. Tag-filtered contact list
 - Reads the device contacts and shows only contacts whose **display name** (and optionally the contact's note or organization field) matches one of your tags.
-- **Default tags:** `12step`, `saa`, `aa`, `newcomer`.
+- **Default tags:** `12step`, `saa`, `aa`, `newcomer`, `sponsee`, `sponsor`.
 - Tags are editable: add, remove, rename, reset to defaults.
 - **Matching rules:**
   - Case-insensitive.
-  - Whole-token matching, so `aa` matches "John AA" or "John (AA)" but **not** "Aaron". Tokens split on whitespace and punctuation (`()[]-_/.,|`).
+  - Whole-token matching, so `aa` matches "John AA" or "John (AA)" but **not** "Aaron". Tokens split on whitespace and punctuation (any character that is not a letter or digit, e.g. `()[]-_/.,|`).
   - Spacing and dashes are normalized, so `12step` also matches "12 step" and "12-step".
 - Filter chips at the top of the list let you narrow to one or more tags.
 - Search box for name filtering within the tagged set.
@@ -95,7 +110,7 @@ StepTwelve makes 12th-step outreach easy. It pulls the program people from your 
 - No accounts, sync, cloud, or sharing features.
 - No reading SMS content.
 - No modifying the user's contacts or call log (read-only).
-- No Play Store distribution for v1. Google Play restricts `READ_CALL_LOG` to default dialer and similar apps, so v1 targets **sideloading** (and possibly F-Droid later).
+- No Play Store distribution for v1. Google Play restricts `READ_CALL_LOG` to default dialer and similar apps, so v1 targets **sideloading** from GitHub Releases (and possibly F-Droid later).
 
 ---
 
@@ -174,7 +189,9 @@ Settings (daily goal, reminder time, lock, FLAG_SECURE, discreet icon) go in Pre
 4. **M4, notes:** Room database in private storage, backup exclusion rules, note editor, notes inline in history, post-call prompt.
 5. **M5, timelog and manual entries.**
 6. **M6, goal, reminders, app lock, FLAG_SECURE, discreet alias.**
-7. **M7, ZIP export/import,** then polish, accessibility pass (TalkBack, font scaling), and a signed release APK.
+7. **M7, ZIP export/import,** then polish, accessibility pass (TalkBack, font scaling), and a signed `v1.0.0` release published on GitHub Releases.
+
+**Status:** M1 done (skeleton, theme, navigation, contacts permission flow, CI with the no-network check, release pipeline). M2 done (tag CRUD backed by Room with default tags, whole-token matcher with unit tests, live tag-filtered contact list with chips and search). Matching against the contact's note/organization field is not built yet. Next up: M3.
 
 ## Testing
 - Unit tests: tag matcher, phone number normalization and matching, goal counting, ZIP export → import round-trip (data identical after restore), schema-version handling.
@@ -182,12 +199,50 @@ Settings (daily goal, reminder time, lock, FLAG_SECURE, discreet icon) go in Pre
 - Manual QA: deny each permission and confirm graceful fallback; reboot and confirm reminders persist; confirm `adb backup` and cloud backup contain no app data; confirm the merged manifest has no network permissions; run with airplane mode on and confirm everything works.
 
 ## Building
+Requires JDK 17 and the Android SDK (platform 36).
 ```bash
 ./gradlew assembleDebug        # debug APK at app/build/outputs/apk/debug/
 ./gradlew test                 # unit tests
-./gradlew assembleRelease      # signed release (configure keystore in local.properties, never commit it)
+./gradlew check                # unit tests, lint, and the no-network-permission manifest check
+./gradlew assembleRelease      # signed release (needs keystore.properties, see below)
 ```
 Install with `adb install app/build/outputs/apk/debug/app-debug.apk`, or copy the APK to the phone and allow installs from that source.
+
+`assemble*` and `check` run `verify<Variant>NoNetworkPermissions`, which fails the build if the merged manifest (including library manifests) requests `INTERNET` or `ACCESS_NETWORK_STATE`.
+
+## CI/CD and releases
+- **CI** (`.github/workflows/ci.yml`): every push to `main` and every pull request runs `./gradlew check assembleDebug`.
+- **Release** (`.github/workflows/release.yml`): pushing a tag like `v1.2.3` builds a signed release APK, verifies the signature, and publishes `steptwelve-1.2.3.apk` plus a `.sha256` checksum on the [Releases page](../../releases). A tag with a suffix (`v1.2.3-beta.1`) is published as a pre-release.
+  - `versionName` comes from the tag (`1.2.3`), and `versionCode` is `major * 1000000 + minor * 1000 + patch`, so every release upgrades the previous one in place.
+
+### One-time signing setup
+Every release must be signed with the **same key**, or Android refuses to install the update over the old version (users would have to uninstall and lose their notes). Generate the key once and back it up somewhere safe:
+```bash
+keytool -genkeypair -v -keystore steptwelve-release.jks -alias steptwelve \
+  -keyalg RSA -keysize 4096 -validity 10000
+```
+Add these repository secrets (Settings > Secrets and variables > Actions):
+
+| Secret | Value |
+|---|---|
+| `STEPTWELVE_KEYSTORE_BASE64` | `base64 -w0 steptwelve-release.jks` |
+| `STEPTWELVE_KEYSTORE_PASSWORD` | keystore password |
+| `STEPTWELVE_KEY_ALIAS` | `steptwelve` |
+| `STEPTWELVE_KEY_PASSWORD` | key password |
+
+For local release builds, create `keystore.properties` in the repo root (git-ignored, never commit it):
+```properties
+storeFile=steptwelve-release.jks
+storePassword=...
+keyAlias=steptwelve
+keyPassword=...
+```
+
+### Cutting a release
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ---
 
