@@ -28,7 +28,16 @@ class CallLogRepository(
     fun observeCalls(): Flow<List<CallRecord>> =
         resolver.observeQuery(CallLog.Calls.CONTENT_URI) { queryCalls() }
 
-    private fun queryCalls(): List<CallRecord> {
+    /**
+     * Outgoing calls made at or after [since], newest first. A small targeted query, so the
+     * post-call prompt doesn't wait for the full live list to be re-read. Call off the main thread.
+     */
+    fun outgoingSince(since: Long): List<CallRecord> = queryCalls(
+        selection = "${CallLog.Calls.TYPE} = ? AND ${CallLog.Calls.DATE} >= ?",
+        args = arrayOf(CallLog.Calls.OUTGOING_TYPE.toString(), since.toString()),
+    )
+
+    private fun queryCalls(selection: String? = null, args: Array<String>? = null): List<CallRecord> {
         val calls = mutableListOf<CallRecord>()
         resolver.query(
             CallLog.Calls.CONTENT_URI,
@@ -40,8 +49,8 @@ class CallLogRepository(
                 CallLog.Calls.DURATION,
                 CallLog.Calls.TYPE,
             ),
-            null,
-            null,
+            selection,
+            args,
             "${CallLog.Calls.DATE} DESC",
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(CallLog.Calls._ID)

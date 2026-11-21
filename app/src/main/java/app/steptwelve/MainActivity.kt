@@ -117,6 +117,7 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         // The user may grant or revoke access in system settings while we're away.
         viewModel.refreshPermissions(this)
+        viewModel.checkPendingCall()
     }
 
     override fun onStop() {

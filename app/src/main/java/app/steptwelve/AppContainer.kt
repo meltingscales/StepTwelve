@@ -23,11 +23,12 @@ class AppContainer(context: Context) {
     val reminderScheduler = ReminderScheduler(context)
     val noteRepository = NoteRepository(database.noteDao(), reminderScheduler)
     private val phoneNumberKeys = PhoneNumberKeys(context)
+    val callLogRepository = CallLogRepository(context.contentResolver, phoneNumberKeys)
     val outreachRepository = OutreachRepository(
         scope = appScope,
         tagRepository = tagRepository,
         contactsRepository = ContactsRepository(context.contentResolver, phoneNumberKeys),
-        callLogRepository = CallLogRepository(context.contentResolver, phoneNumberKeys),
+        callLogRepository = callLogRepository,
         noteDao = database.noteDao(),
         settingsRepository = settingsRepository,
     )

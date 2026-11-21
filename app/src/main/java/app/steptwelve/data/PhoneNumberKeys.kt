@@ -4,6 +4,7 @@ import android.content.Context
 import android.telephony.PhoneNumberUtils
 import android.telephony.TelephonyManager
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Turns phone numbers into comparable keys, so "+1 (555) 123-4567" in a contact and
@@ -20,11 +21,19 @@ class PhoneNumberKeys(context: Context) {
             ?: "US"
     }
 
+    /**
+     * Parsing is slow (libphonenumber) and the same few numbers fill most of a call log, so
+     * results are cached per raw number. An empty string stands for "no key".
+     */
+    private val cache = ConcurrentHashMap<String, String>()
+
     /** [normalized] is a provider-supplied E.164 value (Phone.NORMALIZED_NUMBER, CACHED_NORMALIZED_NUMBER). */
     fun key(number: String?, normalized: String? = null): String? {
         if (!normalized.isNullOrBlank() && normalized.startsWith("+")) return normalized
         if (number.isNullOrBlank()) return null
-        return PhoneNumberUtils.formatNumberToE164(number, countryIso)
-            ?: PhoneNumberUtils.normalizeNumber(number).takeIf { it.isNotEmpty() }
+        return cache.getOrPut(number) {
+            PhoneNumberUtils.formatNumberToE164(number, countryIso)
+                ?: PhoneNumberUtils.normalizeNumber(number)
+        }.ifEmpty { null }
     }
 }

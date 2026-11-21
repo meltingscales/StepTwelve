@@ -12,17 +12,21 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import app.steptwelve.AppContainer
 import app.steptwelve.PendingCall
 import app.steptwelve.data.CallNote
-import app.steptwelve.data.CallType
+import app.steptwelve.data.CallRecord
 import app.steptwelve.data.OutreachSnapshot
 import app.steptwelve.data.Settings
 import app.steptwelve.domain.OutreachContact
 import app.steptwelve.ui.common.NoteTarget
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Activity-scoped state shared by every screen. */
 class MainViewModel(private val container: AppContainer) : ViewModel() {
@@ -37,8 +41,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     private val _noteTarget = MutableStateFlow<NoteTarget?>(null)
     val noteTarget: StateFlow<NoteTarget?> = _noteTarget
 
+    private var postCallPoll: Job? = null
+
     init {
-        // Post-call prompt: once a call dialed from the app shows up in the call log, offer a note.
+        // Fallback for a slow dialer: the live call log eventually shows the call.
         viewModelScope.launch {
             combine(container.postCallTracker.pending, snapshot, settings) { pending, snap, s -> Triple(pending, snap, s) }
                 .collect { (pending, snap, s) ->
@@ -47,17 +53,47 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                         container.postCallTracker.clear()
                         return@collect
                     }
-                    val contact = snap.contact(pending.lookupKey) ?: return@collect
-                    val call = contact.calls.firstOrNull {
-                        it.type == CallType.OUTGOING && it.numberKey in pending.numberKeys &&
-                            it.date >= pending.startedAt - 10_000
-                    } ?: return@collect
-                    container.postCallTracker.clear()
-                    if (_noteTarget.value == null && contact.notes.none { n -> n.matches(call) }) {
-                        _noteTarget.value = NoteTarget(contact, call = call, title = "How did the call go?")
-                    }
+                    snap.contact(pending.lookupKey)?.calls?.firstOrNull { pending.matches(it) }
+                        ?.let { offerPostCallNote(pending, it) }
                 }
         }
+    }
+
+    /**
+     * Back from the dialer with a call pending: look for just that call, a few times while the
+     * phone finishes writing it to the call log, instead of waiting for the full list to reload.
+     */
+    fun checkPendingCall() {
+        val pending = container.postCallTracker.pending.value ?: return
+        if (settings.value?.postCallPrompt == false) return
+        postCallPoll?.cancel()
+        postCallPoll = viewModelScope.launch {
+            repeat(20) {
+                if (container.postCallTracker.pending.value != pending) return@launch
+                val call = withContext(Dispatchers.IO) {
+                    runCatching { container.callLogRepository.outgoingSince(pending.startedAt - 10_000) }.getOrNull()
+                }?.firstOrNull { pending.matches(it) }
+                if (call != null) {
+                    offerPostCallNote(pending, call)
+                    return@launch
+                }
+                delay(500)
+            }
+        }
+    }
+
+    private fun offerPostCallNote(pending: PendingCall, call: CallRecord) {
+        if (container.postCallTracker.pending.value != pending) return
+        container.postCallTracker.clear()
+        postCallPoll?.cancel()
+        val contact = snapshot.value.contact(pending.lookupKey) ?: return
+        if (_noteTarget.value == null && contact.notes.none { it.matches(call) }) {
+            _noteTarget.value = NoteTarget(contact, call = call, title = "How did the call go?", postCall = true)
+        }
+    }
+
+    override fun onCleared() {
+        postCallPoll?.cancel()
     }
 
     fun updatePermissions(contacts: Boolean, callLog: Boolean) =

@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -63,6 +64,8 @@ data class NoteTarget(
     val existing: CallNote? = null,
     /** Title override, e.g. "How did the call go?" for the post-call prompt. */
     val title: String? = null,
+    /** The post-call prompt: closes only via Skip or Save, so a stray tap can't dismiss it. */
+    val postCall: Boolean = false,
 ) {
     val isManual: Boolean get() = existing?.isManual ?: (call == null)
 }
@@ -80,7 +83,10 @@ fun NoteEditorSheet(
     val context = LocalContext.current
     val zone = ZoneId.systemDefault()
     val existing = target.existing
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { it != SheetValue.Hidden || !target.postCall },
+    )
 
     var entryType by remember {
         mutableStateOf(existing?.entryType ?: if (target.call != null) EntryType.PHONE_CALL else EntryType.IN_PERSON)
@@ -193,7 +199,7 @@ fun NoteEditorSheet(
                     TextButton(onClick = { confirmDelete = true }) { Text("Delete") }
                     Spacer(Modifier.weight(1f))
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text(if (target.postCall) "Skip" else "Cancel") }
                 Button(onClick = {
                     val contact = target.contact.contact
                     val base = existing ?: CallNote(
